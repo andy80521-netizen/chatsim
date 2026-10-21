@@ -42,6 +42,8 @@ const TABS: [Tab, string, IconName][] = [
   ['settings', '設定', 'sliders'],
 ]
 
+const TITLE: Record<Tab, string> = { chats: '對話', chars: '角色', tpl: '模板', settings: '設定' }
+
 const NEXT_THEME: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark', dark: 'system' }
 const THEME_ICON: Record<ThemeMode, IconName> = { system: 'auto', light: 'sun', dark: 'moon' }
 const THEME_LABEL: Record<ThemeMode, string> = { system: '跟隨系統', light: '淺色', dark: '深色' }
@@ -52,6 +54,17 @@ export function DropLogo({ className = 'droplet-logo' }: { className?: string })
       <path fill="currentColor" d="M12 1.6C16.6 8 21 13 21 19.6a9 9 0 01-18 0C3 13 7.4 8 12 1.6z" />
       <path d="M8.2 13.5c-.9 1.6-1.4 3.3-1.4 4.9" fill="none" stroke="rgb(255 255 255 / .7)" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
+  )
+}
+
+function Face({ c, aff, onClick }: { c: Character; aff: number | null; onClick: () => void }) {
+  return (
+    <button className="face" onClick={onClick} aria-label={`和${c.name}聊天`}>
+      <span className="face-ring" style={{ ['--p' as string]: `${aff ?? 0}%` }} data-new={aff === null || undefined}>
+        <Avatar c={c} size={56} />
+      </span>
+      <span className="face-name">{c.name}</span>
+    </button>
   )
 }
 
@@ -127,10 +140,10 @@ export default function Home(p: Props) {
   return (
     <div className="home">
       <header className="home-head">
-        <div className="wordmark">
+        <h1 className="page-title">
           <DropLogo />
-          ChatSim
-        </div>
+          {TITLE[tab]}
+        </h1>
         <div className="home-head-actions">
           <button
             className="icon-btn"
@@ -163,8 +176,7 @@ export default function Home(p: Props) {
           <>
             <section className="section">
               <div className="section-head">
-                <h2>想和誰說話</h2>
-                {chars.length > 0 && <span className="count">{chars.length} 位角色</span>}
+                <h2 className="label">想和誰說話</h2>
               </div>
               {chars.length === 0 ? (
                 <div className="empty">
@@ -180,13 +192,15 @@ export default function Home(p: Props) {
                   </div>
                 </div>
               ) : (
-                <div className="cast">
+                <div className="faces">
                   {chars.map((c) => (
-                    <PortraitCard key={c.id} c={c} aff={affOf(c.id)} onClick={() => talkTo(c.id)} />
+                    <Face key={c.id} c={c} aff={affOf(c.id)} onClick={() => talkTo(c.id)} />
                   ))}
-                  <button className="card-portrait card-new" onClick={() => p.onEditChar(null)}>
-                    <Icon name="plus" size={22} />
-                    新角色
+                  <button className="face" onClick={() => p.onEditChar(null)} aria-label="新增角色">
+                    <span className="face-ring face-add">
+                      <Icon name="plus" size={22} />
+                    </span>
+                    <span className="face-name">新角色</span>
                   </button>
                 </div>
               )}
@@ -195,12 +209,13 @@ export default function Home(p: Props) {
             {convs.length > 0 && (
               <section className="section">
                 <div className="section-head">
-                  <h2>最近的對話</h2>
+                  <h2 className="label">全部對話</h2>
                 </div>
                 <div className="conv-list">
                   {convs.map((c) => {
                     const members = c.characterIds.map((id) => charMap[id]).filter(Boolean) as Character[]
                     const group = c.characterIds.length > 1
+                    const aff = group ? null : affectionOf(pathTo(c.nodes, c.leafId))
                     return (
                       <div key={c.id} className="conv-row">
                         <button
@@ -211,11 +226,11 @@ export default function Home(p: Props) {
                           <span className="conv-avatars">
                             {group ? (
                               <>
-                                <Avatar c={members[0]} name={c.title} size={36} />
-                                <Avatar c={members[1]} name={c.title.slice(1)} size={30} />
+                                <Avatar c={members[0]} name={c.title} size={34} />
+                                <Avatar c={members[1]} name={c.title.slice(1)} size={28} />
                               </>
                             ) : (
-                              <Avatar c={members[0]} name={c.title} size={48} />
+                              <Avatar c={members[0]} name={c.title} size={50} />
                             )}
                           </span>
                           <span className="conv-text">
@@ -227,6 +242,14 @@ export default function Home(p: Props) {
                               </span>
                             </span>
                             <span className="conv-last">{lastText(c)}</span>
+                            {aff !== null && (
+                              <span className="conv-aff" aria-label={`好感 ${aff}`}>
+                                <span className="conv-aff-bar">
+                                  <i style={{ width: `${aff}%` }} />
+                                </span>
+                                <span className="conv-aff-num">{aff}</span>
+                              </span>
+                            )}
                           </span>
                         </button>
                         <button
@@ -248,10 +271,9 @@ export default function Home(p: Props) {
 
         {tab === 'chars' && (
           <section className="section">
-            <div className="section-head">
-              <h2>我的角色</h2>
-              <span className="count">點卡片編輯</span>
-            </div>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              {chars.length ? `${chars.length} 位角色，點卡片編輯。` : ''}
+            </p>
             {chars.length === 0 ? (
               <div className="empty">
                 <h3>還沒有角色</h3>
@@ -262,9 +284,9 @@ export default function Home(p: Props) {
                 {chars.map((c) => (
                   <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <PortraitCard c={c} aff={affOf(c.id)} onClick={() => p.onEditChar(c.id)} />
-                    <button className="btn quiet small" onClick={() => exportCharacter(c)}>
-                      <Icon name="download" size={16} />
-                      匯出角色檔
+                    <button className="btn quiet small" onClick={() => exportCharacter(c)} aria-label={`匯出${c.name}的角色檔`}>
+                      <Icon name="download" size={15} />
+                      匯出
                     </button>
                   </div>
                 ))}
@@ -275,9 +297,6 @@ export default function Home(p: Props) {
 
         {tab === 'tpl' && (
           <section className="section">
-            <div className="section-head">
-              <h2>角色模板</h2>
-            </div>
             <p className="hint" style={{ marginBottom: 16 }}>
               加入後就是你的角色，可以隨意改名字、個性和圖片。
             </p>

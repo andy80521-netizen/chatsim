@@ -16,7 +16,7 @@ const P: Record<string, string> = {
   sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 9a2 2 0 100-4 2 2 0 000 4zM9 19a2 2 0 100-4 2 2 0 000 4z',
   sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4',
   moon: 'M19.5 14.2A7.8 7.8 0 019.8 4.5a7.8 7.8 0 109.7 9.7z',
-  auto: 'M12 20.5a8.5 8.5 0 100-17zM12 3.5a8.5 8.5 0 010 17',
+  auto: 'M12 3.5a8.5 8.5 0 110 17 8.5 8.5 0 010-17z',
   pen: 'M4.5 19.5h4l10-10a2.1 2.1 0 00-3-3l-10 10zM13.5 7.5l3 3',
   trash: 'M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7',
   copy: 'M9 9h10v10H9zM5 15V5h10',
@@ -53,6 +53,7 @@ export default function Icon({ name, size = 20, stroke = 1.7 }: { name: IconName
       aria-hidden="true"
     >
       <path d={P[name]} />
+      {name === 'auto' && <path d="M12 3.5a8.5 8.5 0 010 17z" fill="currentColor" stroke="none" />}
     </svg>
   )
 }

@@ -440,7 +440,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
         </button>
         <button className="chat-who" onClick={() => setPanel(true)} aria-label="查看角色資訊">
           {single ? (
-            <Avatar c={lead} size={42} />
+            <Avatar c={lead} size={38} />
           ) : (
             <span className="conv-avatars" style={{ width: 42, height: 42 }}>
               <Avatar c={chars[0]} size={32} />
@@ -465,7 +465,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
         </button>
         {single && (
           <span className="chat-affection" title={`好感 ${aff} / 100`}>
-            <Droplet value={aff} size={30} />
+            <Droplet value={aff} size={26} />
             {aff}
           </span>
         )}
@@ -498,7 +498,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
                 className={`msg ${n.role} ${runStart ? 'run-start' : ''} ${fresh ? 'fresh' : ''}`}
               >
                 {n.role === 'assistant' && (
-                  <span className="msg-avatar">{runStart && <Avatar c={sp ?? lead} size={34} />}</span>
+                  <span className="msg-avatar">{runStart && <Avatar c={sp ?? lead} size={30} />}</span>
                 )}
                 <div className="msg-col">
                   {!single && n.role === 'assistant' && runStart && <span className="who">{sp?.name ?? '?'}</span>}
@@ -554,7 +554,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
           {streaming && (
             <div className="msg assistant run-start fresh">
               <span className="msg-avatar">
-                <Avatar c={charMap[streaming.speakerId] ?? lead} size={34} />
+                <Avatar c={charMap[streaming.speakerId] ?? lead} size={30} />
               </span>
               <div className="msg-col">
                 {!single && <span className="who">{typingName}</span>}
