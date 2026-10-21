@@ -8,6 +8,10 @@ import { createRecognizer, speak, stopSpeaking } from '../speech'
 import type { Recognizer } from '../speech'
 import Panel from './Panel'
 import Modal from './Modal'
+import Icon from './Icon'
+import Avatar from './Avatar'
+import Droplet from './Droplet'
+import type { MomentData } from './Moment'
 
 interface Props {
   conv: Conversation
@@ -18,6 +22,8 @@ interface Props {
   statMax: (k: StatKey, v: number) => void
   onBack: () => void
   onEditChar: (id: string) => void
+  onMoments: (list: MomentData[]) => void
+  onDelete: () => void
 }
 
 type Work = { nodes: Record<string, TNode>; leaf: string | null }
@@ -25,7 +31,7 @@ type Work = { nodes: Record<string, TNode>; leaf: string | null }
 const SUMMARIZE_AFTER = 40 // 未摘要訊息超過這麼多則就觸發
 const SUMMARIZE_CHUNK = 20 // 每次摘要最舊的這麼多則
 
-export default function Chat({ conv, characters, settings, onUpdate, bump, statMax, onBack, onEditChar }: Props) {
+export default function Chat({ conv, characters, settings, onUpdate, bump, statMax, onBack, onEditChar, onMoments, onDelete }: Props) {
   const charMap = useMemo(
     () => Object.fromEntries(characters.map((c) => [c.id, c])) as Record<string, Character>,
     [characters],
@@ -42,6 +48,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const [listening, setListening] = useState(false)
   const [callMode, setCallMode] = useState(false)
+  const [openInner, setOpenInner] = useState<Record<string, boolean>>({})
 
   // 這些 ref 讓非同步流程（串流、語音回呼）永遠讀到最新值
   const convRef = useRef(conv)
@@ -53,6 +60,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
   const recogRef = useRef<Recognizer | null>(null)
   const greetedRef = useRef(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const mountedAt = useRef(Date.now())
 
   const setBusyBoth = (v: boolean) => {
     busyRef.current = v
@@ -68,7 +76,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
   const days = Math.max(1, Math.ceil((Date.now() - conv.createdAt) / 86400000))
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [path.length, streaming?.text])
 
   // 離開畫面時收尾
@@ -170,6 +178,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
 
   async function respond(work: Work, speakers: Character[], transient?: string) {
     stopRef.current = false
+    const before = affectionOf(pathTo(work.nodes, work.leaf))
     let last: TNode | null = null
     for (const sp of speakers) {
       if (stopRef.current) break
@@ -182,6 +191,20 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
     statMax('maxAffection', a)
     if (single && chars[0]) {
       statMax('fragments', chars[0].fragments.filter((f) => f.unlockAt > 0 && a >= f.unlockAt).length)
+
+      // 關鍵時刻：關係升階、回憶碎片解鎖
+      const queue: MomentData[] = []
+      const sBefore = stageOf(before)
+      const sAfter = stageOf(a)
+      if (sAfter.min > sBefore.min) {
+        queue.push({ kind: 'stage', title: sAfter.name, sub: `你和${chars[0].name}的距離又近了一點。` })
+      }
+      for (const f of chars[0].fragments) {
+        if (f.unlockAt > before && f.unlockAt <= a) {
+          queue.push({ kind: 'fragment', title: f.title || '一段過去', sub: `${chars[0].name}願意讓你知道了。到資訊面板看看。` })
+        }
+      }
+      if (queue.length) onMoments(queue)
     }
     void maybeSummarize(work)
 
@@ -221,7 +244,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
     const text = (override ?? input).trim()
     if (!text || busyRef.current || !chars.length) return
     if (!settings.apiKey) {
-      setError('請先到首頁「設定」填入 Gemini API Key')
+      setError('還沒填 Gemini API Key。到首頁的「設定」填好再回來。')
       return
     }
     setInput('')
@@ -293,8 +316,9 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
     setEditing(null)
   }
 
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+
   function removeNode(id: string) {
-    if (!confirm('刪除這則訊息和它之後的所有分支？')) return
     const gone = new Set([id, ...descendants(cm, id)])
     const parent = conv.nodes[id]?.parentId ?? null
     onUpdate((c) => {
@@ -302,6 +326,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
       gone.forEach((g) => delete nodes[g])
       return { ...c, nodes, leafId: c.leafId && gone.has(c.leafId) ? parent : c.leafId }
     })
+    setConfirmRemove(null)
     setMenuId(null)
   }
 
@@ -328,7 +353,7 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
       () => setListening(false),
     )
     if (!r) {
-      setError('這個瀏覽器不支援語音輸入（建議用 Chrome 或 Safari）')
+      setError('這個瀏覽器不支援語音輸入，請改用 Chrome 或 Safari。')
       callRef.current = false
       setCallMode(false)
       return
@@ -375,97 +400,220 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
 
   if (!chars.length) {
     return (
-      <div className="screen">
-        <header className="bar">
-          <button className="ghost" onClick={onBack}>‹ 返回</button>
-          <h1>{conv.title}</h1>
-          <span />
+      <div className="chat">
+        <header className="chat-head">
+          <button className="icon-btn back" onClick={onBack} aria-label="返回">
+            <Icon name="back" />
+          </button>
+          <div className="chat-who-text">
+            <span className="chat-name">{conv.title}</span>
+          </div>
         </header>
-        <p className="empty">這個對話的角色已被刪除，請建立新對話。</p>
+        <div className="welcome">
+          <div className="welcome-inner">
+            <h2 style={{ fontSize: 24 }}>這段對話的角色已經不在了</h2>
+            <p className="hint">角色被刪除後，對話還留著，但沒辦法繼續聊。可以回首頁開一段新的對話。</p>
+          </div>
+        </div>
       </div>
     )
   }
 
+  const lead = chars[0]
+  const bgSrc = single ? lead.background || lead.portrait : undefined
   const menuNode = menuId ? conv.nodes[menuId] : undefined
+  const typingName = streaming ? charMap[streaming.speakerId]?.name : ''
 
+  const stand = single && lead.portrait
   return (
-    <div className="screen chat">
-      <header className="bar">
-        <button className="ghost" onClick={onBack}>‹ 返回</button>
-        <h1>{single ? chars[0].name : conv.title}</h1>
-        <button className="ghost" onClick={() => setPanel(true)}>☰</button>
+    <div className={`chat ${stand ? 'has-stand' : ''}`}>
+      <div
+        className={`chat-bg ${lead.background ? '' : 'soft'}`}
+        style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : { display: 'none' }}
+        aria-hidden="true"
+      />
+      {stand && <div className="stand" style={{ backgroundImage: `url(${lead.portrait})` }} aria-hidden="true" />}
+
+      <header className="chat-head">
+        <button className="icon-btn back" onClick={onBack} aria-label="返回">
+          <Icon name="back" />
+        </button>
+        <button className="chat-who" onClick={() => setPanel(true)} aria-label="查看角色資訊">
+          {single ? (
+            <Avatar c={lead} size={42} />
+          ) : (
+            <span className="conv-avatars" style={{ width: 42, height: 42 }}>
+              <Avatar c={chars[0]} size={32} />
+              {chars[1] && <Avatar c={chars[1]} size={26} />}
+            </span>
+          )}
+          <span className="chat-who-text">
+            <span className="chat-name">{single ? lead.name : conv.title}</span>
+            <span className="chat-sub">
+              {streaming ? (
+                <span className="typing-text">{single ? '正在輸入…' : `${typingName} 正在輸入…`}</span>
+              ) : single ? (
+                <>
+                  <span className="stage-chip">{stage.name}</span>
+                  <span>{mood ? `${mood}，相識第 ${days} 天` : `相識第 ${days} 天`}</span>
+                </>
+              ) : (
+                <span>{chars.length} 位角色</span>
+              )}
+            </span>
+          </span>
+        </button>
+        {single && (
+          <span className="chat-affection" title={`好感 ${aff} / 100`}>
+            <Droplet value={aff} size={30} />
+            {aff}
+          </span>
+        )}
+        <button className="icon-btn" onClick={() => setPanel(true)} aria-label="資訊面板">
+          <Icon name="panel" />
+        </button>
       </header>
 
-      {single && (
-        <div className="status">
-          <span className="badge">{stage.name}</span>
-          <div className="meter"><i style={{ width: `${aff}%` }} /></div>
-          <span>{aff}</span>
-          {mood && <span className="dim">· {mood}</span>}
-          <span className="dim">· 相識 {days} 天</span>
-        </div>
-      )}
+      <main className="msgs" aria-live="polite">
+        <div className="msgs-inner">
+          {ctx.memory && (
+            <span className="memory-note">
+              <Icon name="memory" size={14} />
+              較早的對話已收進記憶
+            </span>
+          )}
 
-      <main className="msgs">
-        {ctx.memory && <div className="memory">🧠 已記住較早的對話</div>}
-
-        {path.map((n, i) => {
-          const sib = cm[n.parentId ?? 'ROOT'] ?? []
-          const idx = sib.indexOf(n.id)
-          const sp = n.speakerId ? charMap[n.speakerId] : undefined
-          const isLast = i === path.length - 1
-          return (
-            <div key={n.id} id={`n-${n.id}`} className={`msg ${n.role}`}>
-              {!single && n.role === 'assistant' && <div className="who">{sp?.name ?? '?'}</div>}
-              <div className={`bubble ${n.role}`} onClick={() => setMenuId(n.id)}>{n.content}</div>
-              {n.inner && <div className="inner">💭 {n.inner}</div>}
-              {sib.length > 1 && (
-                <div className="switch">
-                  <button className="ghost small" onClick={() => switchBranch(sib[(idx - 1 + sib.length) % sib.length])}>‹</button>
-                  <span>{idx + 1}/{sib.length}</span>
-                  <button className="ghost small" onClick={() => switchBranch(sib[(idx + 1) % sib.length])}>›</button>
+          {path.map((n, i) => {
+            const sib = cm[n.parentId ?? 'ROOT'] ?? []
+            const idx = sib.indexOf(n.id)
+            const sp = n.speakerId ? charMap[n.speakerId] : undefined
+            const prev = path[i - 1]
+            const runStart = !prev || prev.role !== n.role || prev.speakerId !== n.speakerId
+            const isLast = i === path.length - 1
+            const fresh = n.ts > mountedAt.current
+            return (
+              <div
+                key={n.id}
+                id={`n-${n.id}`}
+                className={`msg ${n.role} ${runStart ? 'run-start' : ''} ${fresh ? 'fresh' : ''}`}
+              >
+                {n.role === 'assistant' && (
+                  <span className="msg-avatar">{runStart && <Avatar c={sp ?? lead} size={34} />}</span>
+                )}
+                <div className="msg-col">
+                  {!single && n.role === 'assistant' && runStart && <span className="who">{sp?.name ?? '?'}</span>}
+                  <button className={`bubble ${n.role}`} onClick={() => setMenuId(n.id)}>
+                    {n.content}
+                  </button>
+                  {n.inner && (
+                    <button
+                      className={`inner ${openInner[n.id] ? 'open' : ''}`}
+                      onClick={() => setOpenInner((o) => ({ ...o, [n.id]: !o[n.id] }))}
+                      aria-expanded={!!openInner[n.id]}
+                    >
+                      <Icon name="drop" size={15} />
+                      {openInner[n.id] ? <span className="inner-text">{n.inner}</span> : <span>心聲</span>}
+                    </button>
+                  )}
+                  {(sib.length > 1 || (isLast && n.role === 'assistant' && !busy)) && (
+                    <div className="msg-tools">
+                      {sib.length > 1 && (
+                        <>
+                          <button
+                            className="icon-btn"
+                            onClick={() => switchBranch(sib[(idx - 1 + sib.length) % sib.length])}
+                            aria-label="上一條分支"
+                          >
+                            <Icon name="back" size={15} />
+                          </button>
+                          <span className="branch-count">
+                            {idx + 1}/{sib.length}
+                          </span>
+                          <button
+                            className="icon-btn"
+                            style={{ transform: 'scaleX(-1)' }}
+                            onClick={() => switchBranch(sib[(idx + 1) % sib.length])}
+                            aria-label="下一條分支"
+                          >
+                            <Icon name="back" size={15} />
+                          </button>
+                        </>
+                      )}
+                      {isLast && n.role === 'assistant' && !busy && (
+                        <button className="icon-btn" onClick={() => void regenerate(n)} aria-label="重新生成" title="重新生成">
+                          <Icon name="refresh" size={16} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-              {isLast && n.role === 'assistant' && !busy && (
-                <button className="ghost small" onClick={() => void regenerate(n)}>↻ 重新生成</button>
-              )}
+              </div>
+            )
+          })}
+
+          {streaming && (
+            <div className="msg assistant run-start fresh">
+              <span className="msg-avatar">
+                <Avatar c={charMap[streaming.speakerId] ?? lead} size={34} />
+              </span>
+              <div className="msg-col">
+                {!single && <span className="who">{typingName}</span>}
+                {streaming.text ? (
+                  <div className="bubble assistant">{streaming.text}</div>
+                ) : (
+                  <div className="bubble assistant typing" aria-label="正在輸入">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                )}
+              </div>
             </div>
-          )
-        })}
+          )}
 
-        {streaming && (
-          <div className="msg assistant">
-            {!single && <div className="who">{charMap[streaming.speakerId]?.name}</div>}
-            <div className="bubble assistant">{streaming.text || '…'}</div>
-          </div>
-        )}
-
-        {error && <div className="error">{error}</div>}
-        <div ref={endRef} />
+          {error && <div className="chat-error">{error}</div>}
+          <div ref={endRef} />
+        </div>
       </main>
 
       <footer className="composer">
-        {callMode && <div className="hint center">📞 通話模式：說話 → 自動送出 → 角色回覆並朗讀{listening ? '（聆聽中…）' : ''}</div>}
-        <div className="inputrow">
-          <button className={`icon ${listening ? 'live' : ''}`} onClick={toggleMic} title="語音輸入">🎤</button>
-          <button className={`icon ${callMode ? 'live' : ''}`} onClick={toggleCall} title="通話模式">📞</button>
-          <textarea
-            rows={1}
-            value={input}
-            placeholder="輸入訊息…"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                void send()
-              }
-            }}
-          />
-          {busy ? (
-            <button onClick={stop}>■ 停止</button>
-          ) : (
-            <button className="primary" onClick={() => void send()} disabled={!input.trim()}>送出</button>
+        <div className="composer-inner">
+          {callMode && (
+            <span className="call-banner">
+              <Icon name="phone" size={15} />
+              {listening ? '正在聽你說…' : '通話中，說完會自動送出'}
+            </span>
           )}
+          <div className="composer-bar">
+            <button className={`icon-btn ${listening && !callMode ? 'live' : ''}`} onClick={toggleMic} aria-label="語音輸入" title="語音輸入">
+              <Icon name="mic" />
+            </button>
+            <button className={`icon-btn ${callMode ? 'live' : ''}`} onClick={toggleCall} aria-label={callMode ? '結束通話' : '開始通話'} title="通話模式">
+              <Icon name="phone" />
+            </button>
+            <textarea
+              rows={1}
+              value={input}
+              placeholder={single ? `對${lead.name}說…` : '說點什麼…'}
+              aria-label="訊息"
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  void send()
+                }
+              }}
+            />
+            {busy ? (
+              <button className="send stop" onClick={stop} aria-label="停止">
+                <Icon name="stop" size={18} />
+              </button>
+            ) : (
+              <button className="send" onClick={() => void send()} disabled={!input.trim()} aria-label="送出">
+                <Icon name="send" size={19} />
+              </button>
+            )}
+          </div>
         </div>
       </footer>
 
@@ -481,32 +629,86 @@ export default function Chat({ conv, characters, settings, onUpdate, bump, statM
           onJump={(leaf) => onUpdate((c) => ({ ...c, leafId: leaf }))}
           onScroll={(id) => document.getElementById(`n-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
           onEditChar={(id) => onEditChar(id)}
+          onDelete={onDelete}
           onClose={() => setPanel(false)}
         />
       )}
 
       {menuNode && (
         <Modal onClose={() => setMenuId(null)}>
+          <p className="menu-preview">{menuNode.content}</p>
           <div className="menu">
-            {menuNode.role === 'assistant' && <button onClick={() => readAloud(menuNode.content)}>🔊 朗讀</button>}
-            <button onClick={() => { setEditing({ id: menuNode.id, text: menuNode.content }); setMenuId(null) }}>✏️ 編輯</button>
-            <button onClick={() => { void navigator.clipboard?.writeText(menuNode.content); setMenuId(null) }}>📋 複製</button>
-            {menuNode.role === 'assistant' ? (
-              <button onClick={() => rewindTo(menuNode.id)}>⏪ 回到這裡重來（開新分支）</button>
-            ) : (
-              <button onClick={() => rewriteUser(menuNode)}>✍️ 改寫這句（開新分支）</button>
+            {menuNode.role === 'assistant' && (
+              <button onClick={() => readAloud(menuNode.content)}>
+                <Icon name="speaker" />
+                朗讀
+              </button>
             )}
-            <button className="danger" onClick={() => removeNode(menuNode.id)}>🗑 刪除這則與之後分支</button>
+            <button
+              onClick={() => {
+                setEditing({ id: menuNode.id, text: menuNode.content })
+                setMenuId(null)
+              }}
+            >
+              <Icon name="pen" />
+              編輯這則
+            </button>
+            <button
+              onClick={() => {
+                void navigator.clipboard?.writeText(menuNode.content)
+                setMenuId(null)
+              }}
+            >
+              <Icon name="copy" />
+              複製
+            </button>
+            {menuNode.role === 'assistant' ? (
+              <button onClick={() => rewindTo(menuNode.id)}>
+                <Icon name="rewind" />
+                從這裡重來，開一條新分支
+              </button>
+            ) : (
+              <button onClick={() => rewriteUser(menuNode)}>
+                <Icon name="branch" />
+                改寫這句，開一條新分支
+              </button>
+            )}
+            <button className="danger" onClick={() => setConfirmRemove(menuNode.id)}>
+              <Icon name="trash" />
+              刪除這則和後面的分支
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmRemove && (
+        <Modal title="刪除這則訊息？" onClose={() => setConfirmRemove(null)}>
+          <p className="hint">這則訊息和它後面的所有分支都會一起刪除，刪了就找不回來。</p>
+          <div className="sheet-actions">
+            <button className="btn quiet" onClick={() => setConfirmRemove(null)}>
+              取消
+            </button>
+            <button className="btn danger" onClick={() => removeNode(confirmRemove)}>
+              刪除
+            </button>
           </div>
         </Modal>
       )}
 
       {editing && (
         <Modal title="編輯訊息" onClose={() => setEditing(null)}>
-          <textarea rows={6} value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
-          <button className="primary" onClick={saveEdit}>儲存</button>
+          <textarea rows={6} value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} autoFocus />
+          <div className="sheet-actions">
+            <button className="btn quiet" onClick={() => setEditing(null)}>
+              取消
+            </button>
+            <button className="btn primary" onClick={saveEdit}>
+              儲存
+            </button>
+          </div>
         </Modal>
       )}
+
     </div>
   )
 }

@@ -30,10 +30,12 @@ import {
   subscribeUserData,
   uploadAllToCloud,
 } from './sync'
-import Home from './components/Home'
+import Home, { DropLogo } from './components/Home'
 import CharacterEditor from './components/CharacterEditor'
 import Chat from './components/Chat'
 import Modal from './components/Modal'
+import Moment, { type MomentData } from './components/Moment'
+import Icon from './components/Icon'
 
 type View =
   | { name: 'home' }
@@ -53,6 +55,16 @@ export default function App() {
   const [achv, setAchv] = useStored<Record<string, number>>('chatsim2.achv', {})
   const [view, setView] = useState<View>({ name: 'home' })
   const [toast, setToast] = useState('')
+  const [moments, setMoments] = useState<MomentData[]>([])
+  // 演出排隊：正在播放的那個不動，其餘依「升階 → 回憶 → 成就」排序
+  const pushMoments = useCallback((list: MomentData[]) => {
+    const rank = { stage: 0, fragment: 1, achv: 2 }
+    setMoments((m) => {
+      const [head, ...rest] = m
+      const sorted = [...rest, ...list].sort((a, b) => rank[a.kind] - rank[b.kind])
+      return head ? [head, ...sorted] : sorted
+    })
+  }, [])
 
   // Firebase 帳號與同步狀態
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -78,6 +90,19 @@ export default function App() {
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...storedSettings }
   const stats: Stats = { ...EMPTY_STATS, ...storedStats }
+
+  // 外觀：跟隨系統，或手動指定淺色／深色
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const mode = settings.theme === 'system' ? (mq.matches ? 'dark' : 'light') : settings.theme
+      document.documentElement.dataset.theme = mode
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', mode === 'dark' ? '#13111d' : '#fbf5f1')
+    }
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [settings.theme])
 
   // 啟動 Firestore 即時監聽
   const startSubscription = useCallback(
@@ -196,7 +221,7 @@ export default function App() {
       }
       return next
     })
-    setToast(`🏆 解鎖成就：${fresh.map((a) => a.title).join('、')}`)
+    pushMoments(fresh.map((a) => ({ kind: 'achv' as const, title: a.title, sub: a.desc })))
   }, [storedStats, characters.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -330,26 +355,33 @@ export default function App() {
   }
 
   // ---- 畫面 ----
+  // 手機：一次只顯示一個畫面；電腦：左側欄（首頁）＋右側主畫面
   let body
+  let screen: 'home' | 'chat' | 'edit' = 'home'
 
   if (view.name === 'edit') {
+    screen = 'edit'
     const existing = characters.find((c) => c.id === view.id) ?? null
     const back = view.back
     body = (
       <CharacterEditor
+        key={view.id ?? 'new'}
         initial={existing}
         settings={settings}
         onSave={(c) => {
           saveCharacter(c)
+          setToast(existing ? `已儲存 ${c.name}` : `${c.name} 加入了你的角色`)
           setView(back)
         }}
         onCancel={() => setView(back)}
         onDelete={existing ? () => promptDeleteCharacter(existing.id) : undefined}
+        onToast={setToast}
       />
     )
   } else if (view.name === 'chat') {
     const conv = convs.find((c) => c.id === view.id)
     if (conv) {
+      screen = 'chat'
       const chatView = view
       body = (
         <Chat
@@ -371,18 +403,45 @@ export default function App() {
           statMax={statMax}
           onBack={() => setView({ name: 'home' })}
           onEditChar={(id) => setView({ name: 'edit', id, back: chatView })}
+          onMoments={pushMoments}
+          onDelete={() => promptDeleteConv(conv.id)}
         />
       )
     }
   }
 
+  const lastConv = [...convs].sort((a, b) => b.updatedAt - a.updatedAt)[0]
   if (!body) {
     body = (
+      <div className="welcome">
+        <div className="welcome-inner">
+          <DropLogo className="welcome-drop" />
+          <h2>{characters.length ? '今天想和誰說話？' : '先找一位想說話的人'}</h2>
+          <p className="hint">
+            {characters.length
+              ? '從左邊挑一位角色，或接著上次的對話。'
+              : '到左邊的「模板」加入一位現成的角色，或自己寫一位。'}
+          </p>
+          {lastConv && (
+            <button className="btn primary" onClick={() => setView({ name: 'chat', id: lastConv.id })}>
+              <Icon name="chat" size={18} />
+              繼續和{lastConv.title}聊
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const activeConvId = view.name === 'chat' ? view.id : null
+  const side = (
       <Home
         characters={characters}
         convs={convs}
         settings={settings}
         achv={achv}
+        activeConvId={activeConvId}
+        onToast={setToast}
         currentUser={currentUser}
         onLogin={handleLogin}
         onLogout={handleLogout}
@@ -398,62 +457,74 @@ export default function App() {
           setToast(`已加入 ${list.length} 個角色`)
         }}
         onSaveSettings={(s) => {
+          const onlyTheme = s.theme !== settings.theme
           setSettings(s)
-          setToast('設定已儲存')
+          if (!onlyTheme) setToast('設定已儲存')
         }}
         onExportAll={exportAll}
         onImportAll={importAll}
         normalize={normalizeCharacter}
       />
-    )
-  }
+  )
 
   return (
     <>
-      {body}
-      {toast && <div className="toast">{toast}</div>}
+      <div className="shell" data-screen={screen}>
+        <aside className="side">{side}</aside>
+        <main className="stage">{body}</main>
+      </div>
+      {toast && (
+        <div className="toast" role="status" key={toast}>
+          {toast}
+        </div>
+      )}
+      {moments[0] && (
+        <Moment key={moments[0].kind + moments[0].title} m={moments[0]} onDone={() => setMoments((m) => m.slice(1))} />
+      )}
 
-      {/* 刪除確認 Modal */}
+      {/* 刪除確認 */}
       {confirmDelete && (
         <Modal
-          title={`確定刪除${confirmDelete.type === 'char' ? '角色' : '對話'}？`}
+          title={confirmDelete.type === 'char' ? `刪除角色「${confirmDelete.name}」？` : `刪除和${confirmDelete.name}的對話？`}
           onClose={() => setConfirmDelete(null)}
         >
           <p className="hint">
-            確定要刪除「<strong>{confirmDelete.name}</strong>」嗎？
-            {confirmDelete.type === 'char' && '（用到它的對話會保留，但需要重新選角色）'}
+            {confirmDelete.type === 'char'
+              ? '用到這位角色的對話會留著，但沒辦法再繼續聊。刪了就找不回來。'
+              : '這段對話的所有分支、好感和記憶都會一起刪除，刪了就找不回來。'}
           </p>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
-            <button onClick={() => setConfirmDelete(null)}>取消</button>
+          <div className="sheet-actions">
+            <button className="btn quiet" onClick={() => setConfirmDelete(null)}>
+              取消
+            </button>
             <button
-              className="danger"
+              className="btn danger"
               onClick={() => {
                 if (confirmDelete.type === 'char') {
                   doDeleteCharacter(confirmDelete.id)
                 } else {
                   doDeleteConv(confirmDelete.id)
+                  if (view.name === 'chat' && view.id === confirmDelete.id) setView({ name: 'home' })
                 }
                 setConfirmDelete(null)
               }}
             >
-              確定刪除
+              刪除
             </button>
           </div>
         </Modal>
       )}
 
-      {/* 初次登入同步 Modal：雲端是空的，本機有資料 */}
+      {/* 初次登入：雲端是空的，本機有資料 */}
       {syncModal?.type === 'upload_local' && (
-        <Modal title="雲端同步確認" onClose={() => {}}>
-          <p>
-            偵測到您的 Google 雲端目前沒有資料，但此裝置有本機角色與對話記錄。
-            <br />
-            <strong>要把本機資料上傳到雲端嗎？</strong>
+        <Modal title="把這台裝置的資料帶上雲端？" onClose={() => {}} dismissable={false}>
+          <p className="hint">
+            你的雲端還是空的，這台裝置上有 {characters.length} 位角色、{convs.length} 段對話。上傳之後，用同一個 Google
+            帳號登入的手機或電腦都看得到。
           </p>
-          <p className="hint">上傳後，其他手機或電腦登入同一個 Google 帳號就能看到這些資料。</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+          <div className="sheet-actions stack">
             <button
-              className="primary"
+              className="btn primary block"
               onClick={async () => {
                 const targetUid = syncModal.uid
                 await uploadAllToCloud(targetUid, {
@@ -465,38 +536,38 @@ export default function App() {
                 localStorage.setItem('chatsim2.synced_uid', targetUid)
                 startSubscription(targetUid)
                 setSyncModal(null)
-                setToast('已將本機資料同步至雲端')
+                setToast('已上傳到雲端')
               }}
             >
-              ☁️ 上傳本機資料至雲端
+              <Icon name="upload" size={18} />
+              上傳到雲端
             </button>
             <button
+              className="btn quiet block"
               onClick={() => {
                 const targetUid = syncModal.uid
                 localStorage.setItem('chatsim2.synced_uid', targetUid)
                 startSubscription(targetUid)
                 setSyncModal(null)
-                setToast('已開始雲端模式')
+                setToast('已開始同步，雲端維持空白')
               }}
             >
-              略過（維持雲端為空）
+              先不要
             </button>
           </div>
         </Modal>
       )}
 
-      {/* 初次登入同步 Modal：雲端與本機都有資料 */}
+      {/* 初次登入：雲端與本機都有資料 */}
       {syncModal?.type === 'conflict' && (
-        <Modal title="同步資料選擇" onClose={() => {}}>
-          <p>
-            偵測到雲端已有存檔（角色：{syncModal.cloudData.characters.length} 個、對話：
-            {syncModal.cloudData.convs.length} 個），本機亦有現有資料。
-            <br />
-            <strong>請問要使用哪一邊的資料？</strong>
+        <Modal title="要用哪一份資料？" onClose={() => {}} dismissable={false}>
+          <p className="hint">
+            雲端有 {syncModal.cloudData.characters.length} 位角色、{syncModal.cloudData.convs.length} 段對話；這台裝置有{' '}
+            {characters.length} 位角色、{convs.length} 段對話。選了之後，另一份會被覆蓋。不確定的話，先到設定匯出備份。
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+          <div className="sheet-actions stack">
             <button
-              className="primary"
+              className="btn primary block"
               onClick={() => {
                 const targetUid = syncModal.uid
                 const cloud = syncModal.cloudData
@@ -507,13 +578,14 @@ export default function App() {
                 localStorage.setItem('chatsim2.synced_uid', targetUid)
                 startSubscription(targetUid)
                 setSyncModal(null)
-                setToast('已載入雲端資料並覆蓋本機')
+                setToast('已換成雲端的資料')
               }}
             >
-              ☁️ 使用雲端資料（覆蓋本機）
+              <Icon name="cloud" size={18} />
+              用雲端的，覆蓋這台裝置
             </button>
             <button
-              className="danger"
+              className="btn danger block"
               onClick={async () => {
                 const targetUid = syncModal.uid
                 await overwriteCloudWithLocal(targetUid, {
@@ -525,10 +597,10 @@ export default function App() {
                 localStorage.setItem('chatsim2.synced_uid', targetUid)
                 startSubscription(targetUid)
                 setSyncModal(null)
-                setToast('已將本機資料覆蓋至雲端')
+                setToast('已用這台裝置的資料覆蓋雲端')
               }}
             >
-              💾 使用本機資料（覆蓋雲端）
+              用這台裝置的，覆蓋雲端
             </button>
           </div>
         </Modal>

@@ -15,7 +15,13 @@ export interface Character {
   innerVoice: boolean // 是否顯示內心戲
   fragments: Fragment[]
   createdAt: number
+  // 圖片皆為壓縮後的 data URL（會跟著角色一起同步到雲端）
+  avatar?: string // 頭像（正方形）
+  portrait?: string // 立繪（直式 3:4）
+  background?: string // 聊天背景
 }
+
+export type ThemeMode = 'system' | 'light' | 'dark'
 
 // 對話樹的節點：每則訊息都指向父節點，分支 = 同一父節點有多個子節點
 export interface TNode {
@@ -48,6 +54,7 @@ export interface Settings {
   ttsAuto: boolean // 角色回覆後自動朗讀
   lang: string // 語音語言
   greetAfterHours: number // 隔多久回來時角色主動打招呼，0 = 關閉
+  theme: ThemeMode // 外觀：跟隨系統 / 淺色 / 深色
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -56,6 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ttsAuto: false,
   lang: 'zh-TW',
   greetAfterHours: 0,
+  theme: 'system',
 }
 
 export type StatKey =

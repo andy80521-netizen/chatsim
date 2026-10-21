@@ -11,8 +11,14 @@ export const blankForm = (): CharForm => ({
   fragments: [],
 })
 
+// 只接受 data:image 開頭的圖片，避免匯入檔塞進外部網址或其他內容
+const img = (v: unknown) => (typeof v === 'string' && v.startsWith('data:image/') ? v : undefined)
+
 export function normalizeCharacter(c: Partial<Character>): Character {
   return {
+    avatar: img(c.avatar),
+    portrait: img(c.portrait),
+    background: img(c.background),
     id: uid(),
     name: String(c.name ?? '').trim() || '未命名',
     userName: String(c.userName ?? ''),
@@ -50,6 +56,9 @@ export function exportCharacter(c: Character) {
       greeting: c.greeting,
       innerVoice: c.innerVoice,
       fragments: c.fragments.map((f) => ({ title: f.title, content: f.content, unlockAt: f.unlockAt })),
+      avatar: c.avatar,
+      portrait: c.portrait,
+      background: c.background,
     },
   })
 }
