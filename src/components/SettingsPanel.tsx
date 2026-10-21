@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import type { User } from 'firebase/auth'
 import type { Settings } from '../types'
 import { ACHIEVEMENTS } from '../achievements'
 
@@ -8,15 +9,50 @@ interface Props {
   onSave: (s: Settings) => void
   onExportAll: () => void
   onImportAll: (f: File) => void
+  currentUser: User | null
+  onLogin: () => void
+  onLogout: () => void
 }
 
-export default function SettingsPanel({ settings, achv, onSave, onExportAll, onImportAll }: Props) {
+export default function SettingsPanel({
+  settings,
+  achv,
+  onSave,
+  onExportAll,
+  onImportAll,
+  currentUser,
+  onLogin,
+  onLogout,
+}: Props) {
   const [s, setS] = useState(settings)
   const fileRef = useRef<HTMLInputElement>(null)
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS({ ...s, [k]: v })
 
   return (
     <div className="form">
+      <div className="card">
+        <strong>☁️ 雲端同步</strong>
+        {currentUser ? (
+          <>
+            <p>已登入 Google 帳號：<strong>{currentUser.email}</strong></p>
+            <p className="hint">角色、對話與成就將在登入同一帳號的手機與電腦間即時同步。</p>
+            <div>
+              <button className="small danger" onClick={onLogout}>登出帳號</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p>目前為<strong>本機模式</strong>（資料儲存於瀏覽器 localStorage）。</p>
+            <p className="hint">登入 Google 帳號後，可以在手機與電腦之間即時同步對話、角色與成就。</p>
+            <div>
+              <button className="primary" onClick={onLogin}>使用 Google 帳號登入</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <hr />
+
       <label>
         Gemini API Key
         <input type="password" value={s.apiKey} onChange={(e) => set('apiKey', e.target.value)} placeholder="AIza..." />

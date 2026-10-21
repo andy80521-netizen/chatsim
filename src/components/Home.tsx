@@ -6,6 +6,8 @@ import { TEMPLATES } from '../templates'
 import Modal from './Modal'
 import SettingsPanel from './SettingsPanel'
 
+import type { User } from 'firebase/auth'
+
 interface Props {
   characters: Character[]
   convs: Conversation[]
@@ -20,6 +22,9 @@ interface Props {
   onExportAll: () => void
   onImportAll: (f: File) => void
   normalize: (c: Partial<Character>) => Character
+  currentUser: User | null
+  onLogin: () => void
+  onLogout: () => void
 }
 
 type Tab = 'chats' | 'chars' | 'tpl' | 'settings'
@@ -126,6 +131,9 @@ export default function Home(p: Props) {
             onSave={p.onSaveSettings}
             onExportAll={p.onExportAll}
             onImportAll={p.onImportAll}
+            currentUser={p.currentUser}
+            onLogin={p.onLogin}
+            onLogout={p.onLogout}
           />
         )}
       </main>
